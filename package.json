@@ -1,0 +1,9 @@
+{
+    "name": "napcat-plugin-tsai",
+    "version": "1.0.0",
+    "type": "AI绘画",
+    "main": "index.js",
+    "description": "TS-AI绘画 绘画插件",
+    "author": "Tavre",
+    "dependencies": {}
+}
