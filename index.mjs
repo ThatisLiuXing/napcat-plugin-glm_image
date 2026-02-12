@@ -57,6 +57,21 @@ async function callOB11(ctx, action, params) {
     }
 }
 
+// 消息段工具函数
+function textSegment(text) {
+    return { type: 'text', data: { text } };
+}
+function imageSegment(file) {
+    return { type: 'image', data: { file } };
+}
+async function sendGroupMsg(ctx, groupId, message) {
+    return callOB11(ctx, 'send_msg', {
+        message_type: 'group',
+        group_id: String(groupId),
+        message: typeof message === 'string' ? [textSegment(message)] : message,
+    });
+}
+
 // Fetch helper
 async function callDevApi(endpoint, data = null, method = 'GET') {
     const url = `${currentConfig.apiUrl}?endpoint=${endpoint}`;
@@ -109,17 +124,10 @@ async function pollTask(ctx, taskId, groupId) {
                 if (status === 'completed') {
                     const imgUrl = json.data.result.image_url;
                     // Send Image
-                    await callOB11(ctx, 'send_group_msg', {
-                        group_id: groupId,
-                        message: `[CQ:image,file=${imgUrl}]`
-                    });
-                    // Also send text? Or just image.
+                    await sendGroupMsg(ctx, groupId, [imageSegment(imgUrl)]);
                     return;
                 } else if (status === 'failed') {
-                    await callOB11(ctx, 'send_group_msg', {
-                        group_id: groupId,
-                        message: `生成失败: ${json.data.error || 'Unknown error'}`
-                    });
+                    await sendGroupMsg(ctx, groupId, `生成失败: ${json.data.error || 'Unknown error'}`);
                     return;
                 }
                 // Processing... continue
@@ -128,10 +136,7 @@ async function pollTask(ctx, taskId, groupId) {
             ctx.logger.error("[TS-AI] Polling error", e);
         }
     }
-    await callOB11(ctx, 'send_group_msg', {
-        group_id: groupId,
-        message: `生成超时 (Task: ${taskId})`
-    });
+    await sendGroupMsg(ctx, groupId, `生成超时 (Task: ${taskId})`);
 }
 
 async function onMessage(ctx, event) {
@@ -148,12 +153,12 @@ async function onMessage(ctx, event) {
         const user = event.user_id;
 
         if (!currentConfig.apiKey) {
-            await callOB11(ctx, 'send_group_msg', { group_id: groupId, message: "⚠️ 未配置 API Key，请联系管理员配置 TS-AI 插件。" });
+            await sendGroupMsg(ctx, groupId, "⚠️ 未配置 API Key，请联系管理员配置 TS-AI 插件。");
             return;
         }
 
         // Notify accepted
-        await callOB11(ctx, 'send_group_msg', { group_id: groupId, message: `已收到生图请求，正在生成: ${prompt}` });
+        await sendGroupMsg(ctx, groupId, `已收到生图请求，正在生成: ${prompt}`);
 
         try {
             // Call Image Generation API (RR3 Workflow)
@@ -172,52 +177,44 @@ async function onMessage(ctx, event) {
                 // Poll
                 pollTask(ctx, taskId, groupId);
             } else {
-                await callOB11(ctx, 'send_group_msg', {
-                    group_id: groupId,
-                    message: `请求失败: ${result.error || 'Server rejected'}`
-                });
+                await sendGroupMsg(ctx, groupId, `请求失败: ${result.error || 'Server rejected'}`);
             }
         } catch (e) {
-            await callOB11(ctx, 'send_group_msg', {
-                group_id: groupId,
-                message: `系统错误: ${e.message}`
-            });
+            await sendGroupMsg(ctx, groupId, `系统错误: ${e.message}`);
         }
     }
 }
 
-// Interface implementation
-async function plugin_init(ctx) {
+// ============================================================
+// 插件生命周期导出
+// ============================================================
+export let plugin_config_ui = [];
+
+export async function plugin_init(ctx) {
     ctx.logger.info("[TS-AI] 插件加载中...");
     loadConfig(ctx);
-    // plugin_config_ui is built on demand or static? Reference uses `buildConfigUI(ctx)` result stored in variable.
-    // Wait, reference exports `plugin_config_ui` as an array/object.
-    // It calls `plugin_config_ui = buildConfigUI(ctx)` inside init.
-    // But export is `export { plugin_config_ui }`.
-    // Because ESM exports are bindings, updating the variable works.
+    plugin_config_ui = buildConfigUI(ctx);
 }
 
-// We need to export a specific variable that NapCat reads.
-// In reference: `let plugin_config_ui = []; ... export { plugin_config_ui ... }`
-let plugin_config_ui_obj = [];
-
-async function init_wrapper(ctx) {
-    plugin_init(ctx);
-    plugin_config_ui_obj = buildConfigUI(ctx);
+export async function plugin_onmessage(ctx, event) {
+    if (event.post_type !== 'message') return;
+    await onMessage(ctx, event);
 }
 
-async function plugin_get_config(ctx) {
+export async function plugin_cleanup(ctx) {
+    ctx.logger.info("[TS-AI] 插件已卸载");
+}
+
+export async function plugin_get_config(ctx) {
     return currentConfig;
 }
 
-function plugin_on_config_change(ctx, _, key, value) {
-    saveConfig(ctx, { [key]: value });
+export async function plugin_set_config(ctx, config) {
+    currentConfig = { ...DEFAULT_CONFIG, ...config };
+    saveConfig(ctx, currentConfig);
+    ctx.logger.info("[TS-AI] 配置已通过 WebUI 更新");
 }
 
-export {
-    plugin_config_ui_obj as plugin_config_ui,
-    init_wrapper as plugin_init,
-    plugin_get_config,
-    plugin_on_config_change,
-    onMessage as plugin_onmessage
-};
+export async function plugin_on_config_change(ctx, _, key, value) {
+    saveConfig(ctx, { [key]: value });
+}

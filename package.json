@@ -1,9 +1,19 @@
 {
     "name": "napcat-plugin-tsai",
-    "version": "1.0.1",
-    "type": "AI绘画",
+    "plugin": "AI绘画",
+    "version": "1.0.2",
+    "type": "module",
     "main": "index.mjs",
     "description": "TS-AI绘画 绘画插件",
     "author": "Tavre",
+    "license": "MIT",
+    "napcat": {
+        "tags": [
+            "AI",
+            "图片"
+        ],
+        "minVersion": "4.14.0",
+        "homepage": ""
+    },
     "dependencies": {}
 }
