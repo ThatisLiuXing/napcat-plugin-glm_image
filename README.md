@@ -4,7 +4,8 @@ NapCat 插件 —— glm_image 绘画
 
 ## 注意事项
 
-文件 *package.json* *index.mjs* 为Claude输出，上传仓库和修改其余文件为本人手动执行
+文件 *package.json* *index.mjs* 为Claude输出，上传仓库和修改其余文件为本人手动执行。
+修改目的：解决本人喜欢用GLM，但没有相关插件的问题
 
 ## 功能
 
