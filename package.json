@@ -1,11 +1,11 @@
 {
-    "name": "napcat-plugin-tsai",
-    "plugin": "AI绘画",
-    "version": "1.0.2",
+    "name": "napcat-plugin-glm-image",
+    "plugin": "GLM图像生成",
+    "version": "1.0.0",
     "type": "module",
     "main": "index.mjs",
-    "description": "TS-AI绘画 绘画插件",
-    "author": "Tavre",
+    "description": "使用智谱 GLM 图像生成 API 的绘画插件",
+    "author": "modified from Tavre/napcat-plugin-tsai",
     "license": "MIT",
     "napcat": {
         "tags": [
@@ -13,7 +13,7 @@
             "图片"
         ],
         "minVersion": "4.14.0",
-        "homepage": ""
+        "homepage": "https://bigmodel.cn/"
     },
     "dependencies": {}
 }

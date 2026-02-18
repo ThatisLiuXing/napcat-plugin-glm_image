@@ -3,7 +3,10 @@ import path from 'node:path';
 
 const DEFAULT_CONFIG = {
     apiKey: "",
-    apiUrl: "https://api.tavr.top/v1/index.php",
+    model: "glm-image",
+    size: "1280x1280",
+    quality: "hd",
+    watermarkEnabled: true,
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -15,12 +18,12 @@ function loadConfig(ctx) {
             const raw = fs.readFileSync(configFilePath, "utf-8");
             const loaded = JSON.parse(raw);
             currentConfig = { ...DEFAULT_CONFIG, ...loaded };
-            ctx.logger.info("[TS-AI] 配置已加载");
+            ctx.logger.info("[GLM-Image] 配置已加载");
         } else {
             saveConfig(ctx, DEFAULT_CONFIG);
         }
     } catch (e) {
-        ctx.logger.error("[TS-AI] 加载配置失败", e);
+        ctx.logger.error("[GLM-Image] 加载配置失败", e);
     }
 }
 
@@ -33,18 +36,21 @@ function saveConfig(ctx, newConfig) {
             fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(configFilePath, JSON.stringify(currentConfig, null, 2), "utf-8");
-        ctx.logger.info("[TS-AI] 配置已保存");
+        ctx.logger.info("[GLM-Image] 配置已保存");
     } catch (e) {
-        ctx.logger.error("[TS-AI] 保存配置失败", e);
+        ctx.logger.error("[GLM-Image] 保存配置失败", e);
     }
 }
 
 function buildConfigUI(ctx) {
     const { NapCatConfig } = ctx;
     return NapCatConfig.combine(
-        NapCatConfig.html('<div style="padding:10px; border-bottom:1px solid #ccc;"><h3>TS-AI绘画 插件</h3><br>AI地址： <a href="https://ai.tavr.top/">https://ai.tavr.top/</a><br>指令：生图+关键词</div>'),
-        NapCatConfig.text("apiKey", "API Key", DEFAULT_CONFIG.apiKey, "请输入您的 API Key (sk-...)"),
-        NapCatConfig.text("apiUrl", "API URL", DEFAULT_CONFIG.apiUrl, "API 入口地址")
+        NapCatConfig.html('<div style="padding:10px; border-bottom:1px solid #ccc;"><h3>GLM 图像生成插件</h3><br>API 申请地址： <a href="https://bigmodel.cn/">https://bigmodel.cn/</a><br>指令：生图 + 关键词 &nbsp;|&nbsp; /draw + 关键词</div>'),
+        NapCatConfig.text("apiKey", "API Key", DEFAULT_CONFIG.apiKey, "请输入您的智谱 AI API Key (sk-xxx...)"),
+        NapCatConfig.text("model", "模型", DEFAULT_CONFIG.model, "可选: glm-image / cogview-4-250304 / cogview-4 / cogview-3-flash"),
+        NapCatConfig.text("size", "图片尺寸", DEFAULT_CONFIG.size, "glm-image 推荐: 1280x1280 / 1568x1056 / 1056x1568"),
+        NapCatConfig.text("quality", "质量", DEFAULT_CONFIG.quality, "hd（精细，约20s）或 standard（快速，5-10s），glm-image 仅支持 hd"),
+        NapCatConfig.text("watermarkEnabled", "是否加水印", String(DEFAULT_CONFIG.watermarkEnabled), "true 或 false"),
     );
 }
 
@@ -53,7 +59,7 @@ async function callOB11(ctx, action, params) {
     try {
         return await ctx.actions.call(action, params, ctx.adapterName, ctx.pluginManager.config);
     } catch (e) {
-        ctx.logger.error(`[TS-AI] Call OB11 ${action} failed:`, e);
+        ctx.logger.error(`[GLM-Image] Call OB11 ${action} failed:`, e);
     }
 }
 
@@ -72,115 +78,76 @@ async function sendGroupMsg(ctx, groupId, message) {
     });
 }
 
-// Fetch helper
-async function callDevApi(endpoint, data = null, method = 'GET') {
-    const url = `${currentConfig.apiUrl}?endpoint=${endpoint}`;
-    const headers = {
-        'x-api-key': currentConfig.apiKey,
-        'Content-Type': 'application/json',
-        'User-Agent': 'NapCat-TSAI/1.0'
+// 调用智谱 GLM 图像生成 API（同步接口，直接返回图片 URL）
+async function generateImage(prompt) {
+    const body = {
+        model: currentConfig.model,
+        prompt: prompt,
+        size: currentConfig.size,
+        watermark_enabled: currentConfig.watermarkEnabled === true || currentConfig.watermarkEnabled === 'true',
     };
 
-    const options = {
-        method,
-        headers,
-    };
-
-    if (data) {
-        options.body = JSON.stringify(data);
+    // glm-image 不支持 quality 参数
+    if (currentConfig.model !== "glm-image") {
+        body.quality = currentConfig.quality;
     }
 
-    try {
-        // dynamic import or global fetch (Node 18+)
-        const res = await fetch(url, options);
-        const json = await res.json();
-        return json;
-    } catch (e) {
-        throw new Error(`API Request Failed: ${e.message}`);
+    const res = await fetch("https://open.bigmodel.cn/api/paas/v4/images/generations", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${currentConfig.apiKey}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+        throw new Error(`API 错误 ${res.status}: ${json?.error?.message || JSON.stringify(json)}`);
     }
-}
 
-async function pollTask(ctx, taskId, groupId) {
-    const maxRetries = 60; // 2 minutes
-    for (let i = 0; i < maxRetries; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-
-        try {
-            // Poll status URL constructed based on task_id, or just use endpoint param like script
-            // The python script uses: ?endpoint=task_status&task_id=...
-            // Note: The task_status endpoint requires task_id in GET param
-            // fetch doesn't support params in options body for GET nicely, better append to URL
-
-            // Re-use callDevApi logic but handle GET params
-            // Modify callDevApi to accept query params? or just manual
-            const url = `${currentConfig.apiUrl}?endpoint=task_status&task_id=${taskId}`;
-            const res = await fetch(url, {
-                headers: { 'x-api-key': currentConfig.apiKey }
-            });
-            const json = await res.json();
-
-            if (json.success) {
-                const status = json.data.status;
-                if (status === 'completed') {
-                    const imgUrl = json.data.result.image_url;
-                    // Send Image
-                    await sendGroupMsg(ctx, groupId, [imageSegment(imgUrl)]);
-                    return;
-                } else if (status === 'failed') {
-                    await sendGroupMsg(ctx, groupId, `生成失败: ${json.data.error || 'Unknown error'}`);
-                    return;
-                }
-                // Processing... continue
-            }
-        } catch (e) {
-            ctx.logger.error("[TS-AI] Polling error", e);
+    // 内容安全拦截检测
+    if (json.content_filter?.length) {
+        const blocked = json.content_filter.find(f => f.level <= 1);
+        if (blocked) {
+            throw new Error("内容被安全策略拦截，请修改描述后重试");
         }
     }
-    await sendGroupMsg(ctx, groupId, `生成超时 (Task: ${taskId})`);
+
+    const url = json?.data?.[0]?.url;
+    if (!url) {
+        throw new Error("API 未返回图片 URL，请检查 API Key 或提示词");
+    }
+
+    return url;
 }
 
 async function onMessage(ctx, event) {
-    if (event.message_type !== "group") return; // Only group for now or config?
+    if (event.message_type !== "group") return;
 
     const msg = event.raw_message?.trim() || "";
 
-    // Command parsing: /draw <prompt>
     if (msg.startsWith("/draw ") || msg.startsWith("生图 ")) {
-        const prompt = msg.replace(/^\/draw\s+|trans\s+|生图\s+/, "").trim();
+        const prompt = msg.replace(/^\/draw\s+|^生图\s+/, "").trim();
         if (!prompt) return;
 
         const groupId = event.group_id;
-        const user = event.user_id;
 
         if (!currentConfig.apiKey) {
-            await sendGroupMsg(ctx, groupId, "⚠️ 未配置 API Key，请联系管理员配置 TS-AI 插件。");
+            await sendGroupMsg(ctx, groupId, "⚠️ 未配置 API Key，请联系管理员配置 GLM-Image 插件。");
             return;
         }
 
-        // Notify accepted
-        await sendGroupMsg(ctx, groupId, `已收到生图请求，正在生成: ${prompt}`);
+        await sendGroupMsg(ctx, groupId, `🎨 已收到生图请求，正在生成中: ${prompt}`);
 
         try {
-            // Call Image Generation API (RR3 Workflow)
-            const payload = {
-                prompt: prompt,
-                workflow: "rr3",
-                width: 832,
-                height: 1216,
-                steps: 20
-            };
-
-            const result = await callDevApi('image_generation', payload, 'POST');
-
-            if (result.success) {
-                const taskId = result.data.id;
-                // Poll
-                pollTask(ctx, taskId, groupId);
-            } else {
-                await sendGroupMsg(ctx, groupId, `请求失败: ${result.error || 'Server rejected'}`);
-            }
+            const imageUrl = await generateImage(prompt);
+            ctx.logger.info(`[GLM-Image] 生成成功: ${imageUrl}`);
+            await sendGroupMsg(ctx, groupId, [imageSegment(imageUrl)]);
         } catch (e) {
-            await sendGroupMsg(ctx, groupId, `系统错误: ${e.message}`);
+            ctx.logger.error("[GLM-Image] 生成失败", e);
+            await sendGroupMsg(ctx, groupId, `❌ 生成失败: ${e.message}`);
         }
     }
 }
@@ -191,7 +158,7 @@ async function onMessage(ctx, event) {
 export let plugin_config_ui = [];
 
 export async function plugin_init(ctx) {
-    ctx.logger.info("[TS-AI] 插件加载中...");
+    ctx.logger.info("[GLM-Image] 插件加载中...");
     loadConfig(ctx);
     plugin_config_ui = buildConfigUI(ctx);
 }
@@ -202,7 +169,7 @@ export async function plugin_onmessage(ctx, event) {
 }
 
 export async function plugin_cleanup(ctx) {
-    ctx.logger.info("[TS-AI] 插件已卸载");
+    ctx.logger.info("[GLM-Image] 插件已卸载");
 }
 
 export async function plugin_get_config(ctx) {
@@ -212,7 +179,7 @@ export async function plugin_get_config(ctx) {
 export async function plugin_set_config(ctx, config) {
     currentConfig = { ...DEFAULT_CONFIG, ...config };
     saveConfig(ctx, currentConfig);
-    ctx.logger.info("[TS-AI] 配置已通过 WebUI 更新");
+    ctx.logger.info("[GLM-Image] 配置已通过 WebUI 更新");
 }
 
 export async function plugin_on_config_change(ctx, _, key, value) {
