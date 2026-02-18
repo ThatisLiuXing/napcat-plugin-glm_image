@@ -97,7 +97,7 @@ jobs:
           body_path: CHANGELOG.md
           draft: false
           files: |
-            napcat-plugin-tsai.zip
+            napcat-plugin-glm_image.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
