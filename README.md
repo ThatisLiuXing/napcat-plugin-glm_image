@@ -4,7 +4,7 @@ NapCat 插件 —— glm_image 绘画
 
 # 烂尾啦
 
-我本来就是在这里拉个仓库备份，感觉没什么人用glm，所以就不继续修改了，如果真的喜欢用glm的人，只需要下
+我本来就是在这里拉个仓库备份，感觉没什么人用glm，所以就不继续修改了，如果真的喜欢用glm的人，只需要去安装插件 https://github.com/Tavre/napcat-plugin-tsai ，然后把 index.mjs 和 package.json 替换一下，就可以了
 
 ## 注意事项
 
